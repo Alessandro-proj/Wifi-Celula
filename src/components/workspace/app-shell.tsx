@@ -163,7 +163,7 @@ export function AppShell({ segments }: { segments: string[] }) {
 function displayUserName(user: WorkspaceData["currentUser"]) {
   const fullName = user.fullName.trim();
   if (fullName) return fullName;
-  return user.email.split("@")[0] || "UsuÃ¡rio";
+  return user.email.split("@")[0] || "Usuário";
 }
 
 function renderRoute(route: string, data: WorkspaceData, onDataChanged: () => void) {
@@ -647,7 +647,7 @@ function ParticipantsView({
                 <th className="px-4 py-3">Integrante</th>
                 <th className="px-4 py-3">Telefone</th>
                 <th className="px-4 py-3">Grupo</th>
-                <th className="px-4 py-3 text-right">AÃ§Ãµes</th>
+                <th className="px-4 py-3 text-right">Ações</th>
                 <th className="px-4 py-3">Idade</th>
                 <th className="px-4 py-3">Tipo</th>
                 <th className="px-4 py-3">Status</th>
@@ -1309,7 +1309,7 @@ function UsersAdminView({
                 <th className="px-4 py-3">E-mail</th>
                 <th className="px-4 py-3">Perfil</th>
                 <th className="px-4 py-3">Grupo</th>
-                <th className="px-4 py-3 text-right">AÃ§Ãµes</th>
+                <th className="px-4 py-3 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-blue-50">

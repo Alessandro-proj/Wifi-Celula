@@ -105,7 +105,7 @@ export const adminUserUpdateSchema = adminUserSchema.extend({
     .string()
     .optional()
     .or(z.literal(""))
-    .refine((value) => !value || value.length >= 8, "Use uma senha temporÃ¡ria com 8 caracteres")
+    .refine((value) => !value || value.length >= 8, "Use uma senha temporária com 8 caracteres")
     .transform((value) => (value ? sanitizeText(value) : undefined)),
 });
 
