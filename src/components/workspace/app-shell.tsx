@@ -19,11 +19,13 @@ import {
   Settings,
   ShieldCheck,
   SlidersHorizontal,
+  Trash2,
   UserPlus,
   UserCog,
   UsersRound,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { MonthlyAttendanceChart, WeeklyPresenceChart } from "./charts";
 import { AdminUserForm, MeetingForm, ParticipantForm } from "./forms";
@@ -51,7 +53,8 @@ import {
   type NavItem,
 } from "./ui";
 import { AttendanceRecorder } from "./attendance-recorder";
-import { canAccessRoute, canManageCells, canManageParticipants, canManageUsers } from "@/lib/permissions";
+import { canAccessRoute, canDeleteMeetings, canManageCells, canManageParticipants, canManageUsers } from "@/lib/permissions";
+import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 import { useWorkspaceData } from "@/lib/use-workspace-data";
 import {
   attendanceStatusLabels,
@@ -165,7 +168,7 @@ function displayUserName(user: WorkspaceData["currentUser"]) {
 
 function renderRoute(route: string, data: WorkspaceData, onDataChanged: () => void) {
   if (route === "/dashboard") return <DashboardView data={data} />;
-  if (route === "/encontros") return <MeetingsView data={data} />;
+  if (route === "/encontros") return <MeetingsView data={data} onDataChanged={onDataChanged} />;
   if (route === "/encontros/novo") return <MeetingFormView data={data} />;
   if (route.startsWith("/encontros/") && route.endsWith("/presenca")) {
     const meetingId = route.split("/")[2];
@@ -173,7 +176,7 @@ function renderRoute(route: string, data: WorkspaceData, onDataChanged: () => vo
   }
   if (route.startsWith("/encontros/")) {
     const meetingId = route.split("/")[2];
-    return <MeetingDetailView data={data} meetingId={meetingId} />;
+    return <MeetingDetailView data={data} meetingId={meetingId} onDataChanged={onDataChanged} />;
   }
   if (route === "/integrantes") return <ParticipantsView data={data} onDataChanged={onDataChanged} />;
   if (route === "/integrantes/novo") return <ParticipantFormView data={data} onDataChanged={onDataChanged} />;
@@ -297,9 +300,36 @@ function Info({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MeetingsView({ data }: { data: WorkspaceData }) {
+function MeetingsView({
+  data,
+  onDataChanged,
+}: {
+  data: WorkspaceData;
+  onDataChanged: () => void;
+}) {
   const [statusFilter, setStatusFilter] = useState<"all" | Meeting["status"]>("all");
+  const [deletingMeetingId, setDeletingMeetingId] = useState<string | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
+  const userCanDeleteMeetings = canDeleteMeetings(data.currentUser.role);
   const meetings = sortedMeetings(data).filter((meeting) => statusFilter === "all" || meeting.status === statusFilter);
+
+  async function handleDeleteMeeting(meeting: Meeting) {
+    if (!userCanDeleteMeetings || deletingMeetingId) return;
+    const confirmed = window.confirm(`Excluir o encontro "${meeting.theme}"? As presenças vinculadas também serão apagadas.`);
+    if (!confirmed) return;
+
+    setDeleteMessage(null);
+    setDeletingMeetingId(meeting.id);
+    try {
+      await deleteMeetingRecord(meeting.id);
+      setDeleteMessage("Encontro excluído com sucesso.");
+      onDataChanged();
+    } catch (error) {
+      setDeleteMessage(getMeetingDeleteError(error));
+    } finally {
+      setDeletingMeetingId(null);
+    }
+  }
 
   return (
     <>
@@ -327,6 +357,11 @@ function MeetingsView({ data }: { data: WorkspaceData }) {
           </button>
         ))}
       </div>
+      {deleteMessage && (
+        <div className="mb-5 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-medium text-blue-900">
+          {deleteMessage}
+        </div>
+      )}
       <div className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
         {meetings.map((meeting) => {
           const tone = meetingTone(meeting.status);
@@ -344,9 +379,22 @@ function MeetingsView({ data }: { data: WorkspaceData }) {
                 <span className={`rounded-md px-2 py-1 text-xs font-medium ${tone.badge}`}>
                   {meetingStatusLabels[meeting.status]}
                 </span>
-                <button className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-blue-50" type="button" aria-label="Mais ações">
-                  <MoreVertical aria-hidden className="h-4 w-4" />
-                </button>
+                {userCanDeleteMeetings && (
+                  <button
+                    aria-label={`Excluir ${meeting.theme}`}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg text-rose-600 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={deletingMeetingId === meeting.id}
+                    onClick={() => handleDeleteMeeting(meeting)}
+                    title="Excluir encontro"
+                    type="button"
+                  >
+                    {deletingMeetingId === meeting.id ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-rose-200 border-t-rose-600" />
+                    ) : (
+                      <Trash2 aria-hidden className="h-4 w-4" />
+                    )}
+                  </button>
+                )}
               </div>
             </div>
             <p className="mt-4 text-sm leading-6 text-slate-600">{meeting.description}</p>
@@ -374,8 +422,21 @@ function MeetingFormView({ data }: { data: WorkspaceData }) {
   );
 }
 
-function MeetingDetailView({ data, meetingId }: { data: WorkspaceData; meetingId: string }) {
+function MeetingDetailView({
+  data,
+  meetingId,
+  onDataChanged,
+}: {
+  data: WorkspaceData;
+  meetingId: string;
+  onDataChanged: () => void;
+}) {
+  const router = useRouter();
+  const [deleting, setDeleting] = useState(false);
+  const [deleteMessage, setDeleteMessage] = useState<string | null>(null);
   const meeting = data.meetings.find((item) => item.id === meetingId) ?? data.meetings[0];
+  const userCanDeleteMeetings = canDeleteMeetings(data.currentUser.role);
+
   if (!meeting) {
     return (
       <EmptyState
@@ -386,14 +447,58 @@ function MeetingDetailView({ data, meetingId }: { data: WorkspaceData; meetingId
   }
   const counts = countAttendance(data.attendance.filter((item) => item.meetingId === meeting.id));
 
+  async function handleDeleteMeeting() {
+    if (!userCanDeleteMeetings || deleting || !meeting) return;
+    const confirmed = window.confirm(`Excluir o encontro "${meeting.theme}"? As presenças vinculadas também serão apagadas.`);
+    if (!confirmed) return;
+
+    setDeleteMessage(null);
+    setDeleting(true);
+    try {
+      await deleteMeetingRecord(meeting.id);
+      onDataChanged();
+      router.push("/encontros");
+    } catch (error) {
+      setDeleteMessage(getMeetingDeleteError(error));
+      setDeleting(false);
+    }
+  }
+
   return (
     <>
       <PageTitle
         icon={CalendarDays}
         title={meeting.theme}
         subtitle={`${formatDate(meeting.meetingDate, "dd/MM/yyyy")} às ${meeting.startTime} - ${meeting.address}`}
-        action={<Link className="flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white" href={`/encontros/${meeting.id}/presenca`}><Check aria-hidden className="h-4 w-4" />Abrir chamada</Link>}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Link className="flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white" href={`/encontros/${meeting.id}/presenca`}>
+              <Check aria-hidden className="h-4 w-4" />
+              Abrir chamada
+            </Link>
+            {userCanDeleteMeetings && (
+              <button
+                className="flex min-h-11 items-center gap-2 rounded-lg border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={deleting}
+                onClick={handleDeleteMeeting}
+                type="button"
+              >
+                {deleting ? (
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-rose-200 border-t-rose-600" />
+                ) : (
+                  <Trash2 aria-hidden className="h-4 w-4" />
+                )}
+                {deleting ? "Excluindo..." : "Excluir"}
+              </button>
+            )}
+          </div>
+        }
       />
+      {deleteMessage && (
+        <div className="mb-5 rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-800">
+          {deleteMessage}
+        </div>
+      )}
       <div className="grid gap-5 2xl:grid-cols-[0.75fr_1.25fr]">
         <section className="card p-5">
           <SectionHeader icon={CalendarDays} title="Resumo do encontro" />
@@ -1251,6 +1356,25 @@ function meetingTone(status: Meeting["status"]) {
   } satisfies Record<Meeting["status"], Record<"border" | "badge" | "button" | "icon", string>>;
 
   return tones[status];
+}
+
+async function deleteMeetingRecord(meetingId: string) {
+  const supabase = createBrowserSupabaseClient();
+  if (!supabase) {
+    throw new Error("Configure o Supabase para excluir encontros.");
+  }
+
+  const { error } = await supabase.from("meetings").delete().eq("id", meetingId);
+  if (error) {
+    throw new Error(error.message);
+  }
+}
+
+function getMeetingDeleteError(error: unknown) {
+  if (error instanceof Error && error.message.includes("Configure o Supabase")) {
+    return error.message;
+  }
+  return "Não foi possível excluir este encontro. Apenas administradores podem apagar encontros.";
 }
 
 function visitorVisitCount(data: WorkspaceData, participantId: string) {

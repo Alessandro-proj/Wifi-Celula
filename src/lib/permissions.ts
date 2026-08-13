@@ -8,6 +8,10 @@ export function canManageCells(role: Role) {
   return role === "admin";
 }
 
+export function canDeleteMeetings(role: Role) {
+  return role === "admin";
+}
+
 export function canManageParticipants(role: Role) {
   return role === "admin" || role === "leader";
 }
