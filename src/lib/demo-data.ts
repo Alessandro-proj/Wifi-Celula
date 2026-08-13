@@ -115,6 +115,17 @@ export const demoGroups: CellGroup[] = [
     createdAt: "2026-06-01T12:00:00.000Z",
     updatedAt: "2026-08-01T12:00:00.000Z",
   },
+  {
+    id: "group-felipe",
+    cellId: "cell-wifi",
+    name: "Grupo Felipe",
+    description: "Grupo liderado por Felipe.",
+    color: "green",
+    leaderParticipantId: "p-felipe-lider",
+    active: true,
+    createdAt: "2026-08-01T12:00:00.000Z",
+    updatedAt: "2026-08-01T12:00:00.000Z",
+  },
 ];
 
 const baseParticipants: Array<
@@ -436,6 +447,15 @@ const baseParticipants: Array<
     age: 15,
     joinedAt: "2026-08-01",
     participantType: "teenager",
+    status: "active",
+  },
+  {
+    id: "p-felipe-lider",
+    groupId: "group-felipe",
+    fullName: "Felipe",
+    preferredName: "Felipe",
+    joinedAt: "2026-08-01",
+    participantType: "leader",
     status: "active",
   },
 ];

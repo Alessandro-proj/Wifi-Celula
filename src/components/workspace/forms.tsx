@@ -9,14 +9,16 @@ import type {
   TextareaHTMLAttributes,
 } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import {
   adminUserSchema,
   adminUserUpdateSchema,
+  groupFormSchema,
   meetingFormSchema,
   participantFormSchema,
   type AdminUserValues,
   type AdminUserUpdateValues,
+  type GroupFormValues,
   type MeetingFormValues,
   type ParticipantFormValues,
 } from "@/lib/schemas";
@@ -221,6 +223,161 @@ export function ParticipantForm({
       <button className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white sm:col-span-2" disabled={isSubmitting} type="submit">
         {isSubmitting ? <Loader2 aria-hidden className="h-4 w-4 animate-spin" /> : <Save aria-hidden className="h-4 w-4" />}
         {isEditing ? "Salvar alterações" : defaultType === "visitor" ? "Salvar visitante" : "Salvar integrante"}
+      </button>
+    </form>
+  );
+}
+
+export function GroupForm({
+  cell,
+  participants,
+  group,
+  defaultLeaderName,
+  onSaved,
+}: {
+  cell: Cell;
+  participants: Participant[];
+  group?: CellGroup;
+  defaultLeaderName?: string;
+  onSaved?: () => void;
+}) {
+  const [message, setMessage] = useState<string | null>(null);
+  const isEditing = Boolean(group);
+  const leaders = participants
+    .filter((participant) => participant.active && participant.participantType !== "visitor")
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
+  const defaultValues = useMemo(
+    () => ({
+      name: group?.name ?? (defaultLeaderName ? `Grupo ${defaultLeaderName}` : ""),
+      description: group?.description ?? (defaultLeaderName ? `Grupo liderado por ${defaultLeaderName}.` : ""),
+      color: group?.color ?? "green",
+      leaderParticipantId: group?.leaderParticipantId ?? "",
+      newLeaderName: group ? "" : defaultLeaderName ?? "",
+    }),
+    [defaultLeaderName, group],
+  );
+  const {
+    control,
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<GroupFormValues>({
+    resolver: zodResolver(groupFormSchema),
+    defaultValues,
+  });
+  const selectedLeader = useWatch({ control, name: "leaderParticipantId" });
+
+  useEffect(() => {
+    reset(defaultValues);
+  }, [defaultValues, reset]);
+
+  async function onSubmit(values: GroupFormValues) {
+    setMessage(null);
+    const supabase = createBrowserSupabaseClient();
+    if (!supabase) {
+      setMessage("Configure o Supabase para salvar grupos.");
+      return;
+    }
+
+    const payload = {
+      cell_id: cell.id,
+      name: values.name,
+      description: values.description || null,
+      color: values.color,
+      leader_participant_id: values.leaderParticipantId || null,
+      active: true,
+    };
+
+    const { data: savedGroup, error } = isEditing && group
+      ? await supabase.from("cell_groups").update(payload).eq("id", group.id).select("id").single()
+      : await supabase.from("cell_groups").insert(payload).select("id").single();
+
+    if (error || !savedGroup) {
+      setMessage(error?.message ?? "Não foi possível salvar o grupo.");
+      return;
+    }
+
+    let leaderParticipantId = values.leaderParticipantId || null;
+    if (!leaderParticipantId && values.newLeaderName) {
+      const { data: leader, error: leaderError } = await supabase
+        .from("participants")
+        .insert({
+          cell_id: cell.id,
+          group_id: savedGroup.id,
+          full_name: values.newLeaderName,
+          preferred_name: values.newLeaderName.split(" ")[0],
+          joined_at: new Date().toISOString().slice(0, 10),
+          participant_type: "leader",
+          status: "active",
+          active: true,
+        })
+        .select("id")
+        .single();
+
+      if (leaderError || !leader) {
+        setMessage(leaderError?.message ?? "Não foi possível criar o líder do grupo.");
+        return;
+      }
+      leaderParticipantId = leader.id as string;
+
+      const { error: groupLeaderError } = await supabase
+        .from("cell_groups")
+        .update({ leader_participant_id: leaderParticipantId })
+        .eq("id", savedGroup.id);
+
+      if (groupLeaderError) {
+        setMessage(groupLeaderError.message);
+        return;
+      }
+    }
+
+    if (leaderParticipantId) {
+      const { error: participantError } = await supabase
+        .from("participants")
+        .update({ group_id: savedGroup.id, participant_type: "leader", status: "active", active: true })
+        .eq("id", leaderParticipantId);
+
+      if (participantError) {
+        setMessage(participantError.message);
+        return;
+      }
+    }
+
+    setMessage(isEditing ? "Grupo atualizado com sucesso." : "Grupo criado com sucesso.");
+    if (!isEditing) reset({ ...defaultValues, name: "", description: "", leaderParticipantId: "", newLeaderName: "" });
+    onSaved?.();
+  }
+
+  return (
+    <form className="grid gap-4 sm:grid-cols-2" onSubmit={handleSubmit(onSubmit)}>
+      <Input label="Nome do grupo" error={errors.name?.message} {...register("name")} />
+      <Select label="Cor" error={errors.color?.message} {...register("color")}>
+        <option value="blue">Azul</option>
+        <option value="cyan">Ciano</option>
+        <option value="green">Verde</option>
+        <option value="violet">Violeta</option>
+        <option value="amber">Amarelo</option>
+        <option value="rose">Rosa</option>
+      </Select>
+      <Select label="Líder cadastrado" error={errors.leaderParticipantId?.message} {...register("leaderParticipantId")}>
+        <option value="">Escolher depois</option>
+        {leaders.map((participant) => (
+          <option key={participant.id} value={participant.id}>{participant.fullName}</option>
+        ))}
+      </Select>
+      <Input
+        disabled={Boolean(selectedLeader)}
+        label="Novo líder"
+        placeholder="Ex.: Felipe"
+        error={errors.newLeaderName?.message}
+        {...register("newLeaderName")}
+      />
+      <TextArea label="Descrição" error={errors.description?.message} {...register("description")} />
+      {message && <p className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-800 sm:col-span-2">{message}</p>}
+      <button className="flex min-h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white sm:col-span-2" disabled={isSubmitting} type="submit">
+        {isSubmitting ? <Loader2 aria-hidden className="h-4 w-4 animate-spin" /> : <Save aria-hidden className="h-4 w-4" />}
+        {isEditing ? "Salvar grupo" : "Criar grupo"}
       </button>
     </form>
   );

@@ -69,6 +69,14 @@ export const visitorQuickSchema = z.object({
   wantsReturn: z.boolean().optional(),
 });
 
+export const groupFormSchema = z.object({
+  name: text(3, 100),
+  description: optionalText(280),
+  color: z.enum(["blue", "cyan", "green", "violet", "amber", "rose"]),
+  leaderParticipantId: optionalText(80),
+  newLeaderName: optionalText(140),
+});
+
 export const meetingFormSchema = z.object({
   meetingDate: text(4, 20),
   startTime: text(4, 10),
@@ -104,6 +112,7 @@ export const adminUserUpdateSchema = adminUserSchema.extend({
 export type LoginFormValues = z.infer<typeof loginSchema>;
 export type ParticipantFormValues = z.infer<typeof participantFormSchema>;
 export type VisitorQuickValues = z.infer<typeof visitorQuickSchema>;
+export type GroupFormValues = z.infer<typeof groupFormSchema>;
 export type MeetingFormValues = z.infer<typeof meetingFormSchema>;
 export type AdminUserValues = z.infer<typeof adminUserSchema>;
 export type AdminUserUpdateValues = z.infer<typeof adminUserUpdateSchema>;

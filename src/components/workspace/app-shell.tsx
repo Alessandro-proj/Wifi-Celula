@@ -28,7 +28,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { MonthlyAttendanceChart, WeeklyPresenceChart } from "./charts";
-import { AdminUserForm, MeetingForm, ParticipantForm } from "./forms";
+import { AdminUserForm, GroupForm, MeetingForm, ParticipantForm } from "./forms";
 import {
   AppHeader,
   AttendanceSummary,
@@ -66,7 +66,7 @@ import {
   participantTypeLabels,
   roleLabels,
 } from "@/lib/utils";
-import type { Attendance, AttendanceStatus, Meeting, Participant, Profile, WorkspaceData } from "@/lib/types";
+import type { Attendance, AttendanceStatus, CellGroup, Meeting, Participant, Profile, WorkspaceData } from "@/lib/types";
 
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Início", icon: Home },
@@ -184,7 +184,7 @@ function renderRoute(route: string, data: WorkspaceData, onDataChanged: () => vo
     const participantId = route.split("/")[2];
     return <ParticipantDetailView data={data} onDataChanged={onDataChanged} participantId={participantId} />;
   }
-  if (route === "/grupos") return <GroupsView data={data} />;
+  if (route === "/grupos") return <GroupsView data={data} onDataChanged={onDataChanged} />;
   if (route === "/visitantes") return <VisitorsView data={data} onDataChanged={onDataChanged} />;
   if (route === "/relatorios") return <ReportsView data={data} />;
   if (route === "/aniversariantes") return <BirthdaysView data={data} />;
@@ -823,9 +823,18 @@ function ParticipantDetailView({
   );
 }
 
-function GroupsView({ data }: { data: WorkspaceData }) {
+function GroupsView({
+  data,
+  onDataChanged,
+}: {
+  data: WorkspaceData;
+  onDataChanged: () => void;
+}) {
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<CellGroup | null>(null);
   const visibleGroups = groupsForUser(data);
   const meeting = activeMeeting(data);
+  const canManageGroups = canManageCells(data.currentUser.role);
   const totalGrouped = data.participants.filter(
     (participant) => participant.active && participant.groupId && participant.participantType !== "visitor",
   ).length;
@@ -836,12 +845,26 @@ function GroupsView({ data }: { data: WorkspaceData }) {
         icon={Network}
         title="Grupos"
         subtitle="Acompanhe cada grupo, seu líder e os integrantes que podem ser marcados na presença."
-        action={meeting && (
-          <Link className="flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-lg shadow-blue-600/20" href={`/encontros/${meeting.id}/presenca`}>
-            <Check aria-hidden className="h-4 w-4" />
-            Registrar presença
-          </Link>
-        )}
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            {canManageGroups && (
+              <button
+                className="flex min-h-11 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white shadow-lg shadow-emerald-600/20"
+                onClick={() => setCreatingGroup(true)}
+                type="button"
+              >
+                <Plus aria-hidden className="h-4 w-4" />
+                Novo grupo
+              </button>
+            )}
+            {meeting && (
+              <Link className="flex min-h-11 items-center gap-2 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white shadow-lg shadow-blue-600/20" href={`/encontros/${meeting.id}/presenca`}>
+                <Check aria-hidden className="h-4 w-4" />
+                Registrar presença
+              </Link>
+            )}
+          </div>
+        }
       />
 
       <div className="mb-5 grid gap-4 md:grid-cols-3">
@@ -901,8 +924,23 @@ function GroupsView({ data }: { data: WorkspaceData }) {
                     <RoleBadge type={participant.participantType} />
                   </Link>
                 ))}
+                {!participants.length && (
+                  <div className="rounded-lg border border-dashed border-blue-200 bg-blue-50/50 p-4 text-sm leading-6 text-slate-600">
+                    Nenhum integrante vinculado ainda. Edite um integrante para movê-lo para este grupo.
+                  </div>
+                )}
               </div>
 
+              {canManageGroups && (
+                <button
+                  className="mt-5 flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => setEditingGroup(group)}
+                  type="button"
+                >
+                  <Edit3 aria-hidden className="h-4 w-4" />
+                  Editar grupo
+                </button>
+              )}
               {meeting && (
                 <Link className="mt-5 flex min-h-11 items-center justify-center gap-2 rounded-lg border border-blue-100 bg-white px-4 text-sm font-semibold text-blue-700 hover:bg-blue-50" href={`/encontros/${meeting.id}/presenca?grupo=${group.id}`}>
                   <ClipboardList aria-hidden className="h-4 w-4" />
@@ -913,6 +951,29 @@ function GroupsView({ data }: { data: WorkspaceData }) {
           );
         })}
       </div>
+      <FormModal open={creatingGroup} title="Novo grupo" onClose={() => setCreatingGroup(false)}>
+        <GroupForm
+          cell={data.cell}
+          participants={data.participants}
+          onSaved={() => {
+            setCreatingGroup(false);
+            onDataChanged();
+          }}
+        />
+      </FormModal>
+      <FormModal open={Boolean(editingGroup)} title="Editar grupo" onClose={() => setEditingGroup(null)}>
+        {editingGroup && (
+          <GroupForm
+            cell={data.cell}
+            participants={data.participants}
+            group={editingGroup}
+            onSaved={() => {
+              setEditingGroup(null);
+              onDataChanged();
+            }}
+          />
+        )}
+      </FormModal>
     </>
   );
 }
